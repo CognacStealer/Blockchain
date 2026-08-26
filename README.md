@@ -27,32 +27,58 @@ when the transaction count isn't a power of two.
 
 | File | What it is |
 |---|---|
-| `merkletree.py` | Python version, SHA-256 via `pycryptodome` |
+| `merkletree.py` | Python version — build, proof generation, proof verification |
 | `merkletree.js` | JavaScript version of the same thing |
+| `test_merkletree.py` | 11 property tests over the Python version |
 | `main.py` | Stub from `uv init`, not used |
 
-## Status — this is unfinished
+## Proofs are the point
 
-**`merkletree.py` does not run.** The `buildtree` method stops mid-way through
-the pairing loop:
+A tree with no proof method isn't doing anything a plain hash wouldn't. So both
+versions generate and verify **Merkle proofs**: the sibling hashes along the path
+from one transaction up to the root.
 
-```python
-for i in range(0)     # ← incomplete, no body
+```
+proof for Tx3 = [ hash(Tx4), hash(Tx1Tx2), hash(Tx5Tx5-subtree) ]
 ```
 
-I left it where I stopped. What's still to do:
+Three hashes, not five transactions. For n transactions a proof is log2(n)
+hashes — that's what makes this structure worth building. You hand someone one
+transaction plus three hashes, they recompute the root, and either it matches or
+the transaction isn't in the block.
 
-- [ ] finish the pairing loop — step `i` by 2, concatenate `level[i] + level[i+1]`, hash, append to `next_level`
-- [ ] assign `level = next_level` and append it to `self.levels` each round
-- [ ] return the final single hash as the root
-- [ ] remove the stray `print(hash_obj.digest())` inside `calculateHash` — it's debug output
-- [ ] fix the double-hashing bug in `calculateHash`: it calls `SHA256.new(data)` *and then* `hash_obj.update(data)`, so the data gets fed in twice and the digest is `SHA256(data + data)`, not `SHA256(data)`
-- [ ] add a `get_proof(tx)` method returning the sibling hashes along the path — a tree with no proof method isn't doing anything a plain hash wouldn't
+The demo at the bottom of each file verifies a real transaction (`True`), then
+feeds a **tampered** version of it — `Charlie pays Dave 3 BTC` instead of `2` —
+against the same proof, which must come back `False`.
 
 ## Running it
 
 ```bash
-uv sync           # or: pip install pycryptodome
 python merkletree.py
 node merkletree.js
+python test_merkletree.py
 ```
+
+Both implementations produce the **same root** for the same transactions:
+
+```
+037f343e919ab09c512a799fe0b5d2fed89c4bc1c439020404d654e98ccb7cc0
+```
+
+No dependencies — `hashlib` in Python, Node's builtin `crypto` in JavaScript.
+
+## What was wrong before
+
+The Python file used to be broken, in two ways worth recording:
+
+1. **`buildtree` stopped mid-statement** — `for i in range(0)` with no body. The
+   file didn't even parse.
+2. **`calculateHash` hashed its input twice.** It called `SHA256.new(data)` and
+   *then* `hash_obj.update(data)`, so the digest was `SHA256(data + data)`, not
+   `SHA256(data)`. That one is nastier than the syntax error: it produces
+   perfectly valid-looking 64-character hashes that are silently wrong and match
+   no other SHA-256 implementation on earth. The parity check against the JS
+   version is what would have caught it.
+
+It also imported `Crypto.Hash` from pycryptodome, which isn't a dependency of
+this project. `hashlib` does the same job and mirrors what the JS side uses.
